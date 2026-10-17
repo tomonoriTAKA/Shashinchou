@@ -68,7 +68,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 .group{padding-block:14px;border-bottom:1px solid var(--line);display:grid;gap:10px}
 .group:last-child{border-bottom:0}
 .label{font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:700}
-.presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .preset{position:relative;cursor:pointer;display:grid;justify-items:center;gap:6px;padding:10px 4px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--raised);text-align:center}
 .preset input{position:absolute;opacity:0;pointer-events:none}
 .preset:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--accent-soft)}
@@ -182,6 +182,9 @@ select.text{width:auto}
         <label class="preset"><input type="radio" name="preset" value="p6" id="preset-p6">
           <div class="mini" style="grid-template-columns:repeat(2,1fr);aspect-ratio:210/297"><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <span><b>A4縦</b>3行×2列 6枚</span></label>
+        <label class="preset"><input type="radio" name="preset" value="p2" id="preset-p2">
+          <div class="mini" style="grid-template-columns:1fr;aspect-ratio:210/297"><i></i><i></i></div>
+          <span><b>A4縦</b>2行×1列 2枚</span></label>
         <label class="preset"><input type="radio" name="preset" value="l9" id="preset-l9">
           <div class="mini land" style="grid-template-columns:repeat(3,1fr);aspect-ratio:297/210"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
           <span><b>A4横</b>3行×3列 9枚</span></label>
@@ -218,6 +221,11 @@ select.text{width:auto}
       <label class="field" for="fontPt">文字サイズ
         <select id="fontPt" class="text"><option value="8">8 pt</option><option value="9">9 pt</option><option value="10">10 pt</option><option value="11">11 pt</option></select>
       </label>
+      <div class="label">説明文の位置</div>
+      <div class="seg">
+        <label><input type="radio" name="align" value="left" id="align-left">写真の左端</label>
+        <label><input type="radio" name="align" value="center" id="align-center">中央</label>
+      </div>
     </div>
 
     <div class="group">
@@ -271,11 +279,12 @@ select.text{width:auto}
   const MM2PT = 72 / 25.4;
   const PRESETS = {
     p6: { name: 'A4縦', orient: 'port', rows: 3, cols: 2 },
+    p2: { name: 'A4縦', orient: 'port', rows: 2, cols: 1 },
     l9: { name: 'A4横', orient: 'land', rows: 3, cols: 3 },
     l4: { name: 'A4横', orient: 'land', rows: 2, cols: 2 },
   };
   const DEFAULTS = { preset: 'p6', margin: 10, gap: 5, fit: 'contain', numbering: true, startNo: 1,
-    caption: true, fontPt: 9, header: '', pageNo: true, frame: true, dpi: 200 };
+    caption: true, fontPt: 9, capAlign: 'left', header: '', pageNo: true, frame: true, dpi: 200 };
   const FONT_STACK = '"BIZ UDPGothic","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo",sans-serif';
   const $ = (id) => document.getElementById(id);
 
@@ -302,6 +311,7 @@ select.text{width:auto}
   function bindSettings() {
     $('preset-' + settings.preset).checked = true;
     $('fit-' + settings.fit).checked = true;
+    $('align-' + settings.capAlign).checked = true;
     $('dpi-' + settings.dpi).checked = true;
     $('margin').value = settings.margin; $('gap').value = settings.gap;
     $('numbering').checked = settings.numbering; $('startNo').value = settings.startNo;
@@ -310,6 +320,7 @@ select.text{width:auto}
 
     document.querySelectorAll('input[name=preset]').forEach(el => el.addEventListener('change', () => { settings.preset = el.value; changed(true); }));
     document.querySelectorAll('input[name=fit]').forEach(el => el.addEventListener('change', () => { settings.fit = el.value; changed(); }));
+    document.querySelectorAll('input[name=align]').forEach(el => el.addEventListener('change', () => { settings.capAlign = el.value; changed(); }));
     document.querySelectorAll('input[name=dpi]').forEach(el => el.addEventListener('change', () => { settings.dpi = +el.value; changed(); }));
     $('margin').addEventListener('input', e => { settings.margin = clamp(e.target.value, 0, 40); changed(); });
     $('gap').addEventListener('input', e => { settings.gap = clamp(e.target.value, 0, 30); changed(); });
@@ -350,6 +361,20 @@ select.text{width:auto}
     return { W, H, m, p, lines, cw, ch, photoH: ch - capH, perPage: p.rows * p.cols, cells,
       header: { x: m, y: m, w: W - 2 * m, h: headerH } };
   }
+
+  /* ---------- photo / caption placement (mm) ---------- */
+  function fitRect(aspect, box, fit) {
+    if (fit === 'cover') return { x: box.x, y: box.y, w: box.w, h: box.h };
+    let w = box.w, h = w / aspect;
+    if (h > box.h) { h = box.h; w = h * aspect; }
+    return { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
+  }
+  // left: starts at the photo's left edge and runs to the cell's right edge; center: centred on the cell (= photo centre)
+  function capRect(photoRect, cap, align) {
+    if (align === 'center') return { x: cap.x, y: cap.y, w: cap.w, h: cap.h };
+    return { x: photoRect.x, y: cap.y, w: cap.x + cap.w - photoRect.x, h: cap.h };
+  }
+  function itemAspect(it) { const b = it.base; return it.rot % 180 ? b.height / b.width : b.width / b.height; }
 
   /* ---------- image helpers ---------- */
   async function decode(blob) {
@@ -528,15 +553,16 @@ select.text{width:auto}
       for (let k = 0; k < G.perPage; k++) {
         const idx = p * G.perPage + k, it = items[idx], cell = G.cells[k];
         const ph = document.createElement('div');
-        place(ph, cell.photo);
-        if (!it) { ph.className = 's-slot'; sheet.appendChild(ph); continue; }
+        if (!it) { place(ph, cell.photo); ph.className = 's-slot'; sheet.appendChild(ph); continue; }
+        const pr = fitRect(itemAspect(it), cell.photo, s.fit);
+        place(ph, pr);
         ph.className = 's-photo' + (s.frame ? ' frame' : '');
         const img = document.createElement('img'); img.src = it.url; img.alt = it.caption || it.name;
         img.style.objectFit = s.fit;
         ph.appendChild(img); sheet.appendChild(ph);
         if (G.lines) {
           const cap = document.createElement('div'); cap.className = 's-cap';
-          place(cap, cell.cap); cap.style.fontSize = ptCss(s.fontPt); cap.style.webkitLineClamp = G.lines;
+          place(cap, capRect(pr, cell.cap, s.capAlign)); cap.style.textAlign = s.capAlign === 'center' ? 'center' : 'left'; cap.style.fontSize = ptCss(s.fontPt); cap.style.webkitLineClamp = G.lines;
           if (s.numbering) { const b = document.createElement('b'); b.textContent = '写真' + (s.startNo + idx); cap.appendChild(b); }
           if (s.caption && it.caption.trim()) cap.appendChild(document.createTextNode((s.numbering ? '　' : '') + it.caption.replace(/\s*\n\s*/g, ' ').trim()));
           sheet.appendChild(cap);
@@ -668,7 +694,8 @@ select.text{width:auto}
     }
     x.fillStyle = '#1b1e1c'; x.textBaseline = 'middle';
     lines.forEach((ln, i) => {
-      let px = 0; const py = i * lh + lh / 2;
+      const tw = ln.reduce((a, g) => a + g.w, 0);
+      let px = opts.align === 'center' ? Math.max(0, (c.width - tw) / 2) : 0; const py = i * lh + lh / 2;
       if (opts.vcenter) { /* single line header centred vertically */ }
       ln.forEach(g => { x.font = font(g.b); x.fillText(g.ch, px, opts.vcenter ? c.height / 2 : py); px += g.w; });
     });
@@ -721,15 +748,16 @@ select.text{width:auto}
           release(src);
           const img = await embedCanvas(pdf, canvas, 'image/jpeg', 0.85);
           page.drawImage(img, toPt(rect));
-          if (s.frame) page.drawRectangle({ ...toPt(cell.photo), borderColor: rule, borderWidth: 0.5 });
+          if (s.frame) page.drawRectangle({ ...toPt(rect), borderColor: rule, borderWidth: 0.5 });
           if (G.lines) {
             const runs = [];
             if (s.numbering) runs.push({ text: '写真' + (s.startNo + idx), bold: true });
             const t = s.caption ? it.caption.replace(/\s*\n\s*/g, ' ').trim() : '';
             if (t) runs.push({ text: (s.numbering ? '　' : '') + t, bold: false });
             if (runs.length) {
-              const capImg = await embedCanvas(pdf, textCanvas(cell.cap, runs, s.fontPt, G.lines), 'image/png');
-              page.drawImage(capImg, toPt(cell.cap));
+              const cr = capRect(rect, cell.cap, s.capAlign);
+              const capImg = await embedCanvas(pdf, textCanvas(cr, runs, s.fontPt, G.lines, { align: s.capAlign }), 'image/png');
+              page.drawImage(capImg, toPt(cr));
             }
           }
         }
